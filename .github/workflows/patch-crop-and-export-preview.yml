@@ -1,0 +1,52 @@
+name: Patch crop and export preview
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-crop-and-export-preview.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          s=s.replace(
+            '.cropper-line,.cropper-point{background-color:var(--accent)}.preview',
+            '.cropper-line,.cropper-point{background-color:var(--accent)}.cropper-point{width:18px;height:18px;border-radius:50%;opacity:1}.cropper-point.point-se{width:20px;height:20px}.export-preview{margin:14px auto 10px;max-width:520px;border-radius:18px;overflow:hidden;background:#eee;border:1px solid var(--line)}.export-preview img{width:100%;display:block;aspect-ratio:1/1;object-fit:contain;background:var(--bg)}.preview'
+          )
+
+          marker='</dialog>\n<script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>'
+          export_dialog='''</dialog>\n<dialog id="exportDlg"><div class="sheet"><div class="grab"></div><div class="mhead"><div><h3>關係圖預覽</h3><p>手機上長按圖片即可儲存到相簿。</p></div><button class="close" onclick="exportDlg.close()">×</button></div><div class="export-preview"><img id="exportImage" alt="正方形關係圖預覽"></div><div class="small" style="text-align:center;margin:8px 0 12px">長按上方圖片 → 儲存圖片／加入照片</div><button id="openExportImage" class="ghost" style="width:100%">在新分頁開啟圖片</button></div></dialog>\n<script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>'''
+          if 'id="exportDlg"' not in s:
+              s=s.replace(marker, export_dialog, 1)
+
+          old="S.cropper=new Cropper($('#cropImage'),{aspectRatio:1,viewMode:1,dragMode:'move',autoCropArea:1,background:false,responsive:true,restore:false,ready:updateCropPreview,cropend:updateCropPreview,zoom:updateCropPreview});"
+          new="S.cropper=new Cropper($('#cropImage'),{aspectRatio:1,viewMode:1,dragMode:'move',autoCropArea:.68,background:false,responsive:true,restore:false,cropBoxMovable:true,cropBoxResizable:true,minCropBoxWidth:60,minCropBoxHeight:60,zoomable:true,zoomOnTouch:true,zoomOnWheel:true,toggleDragModeOnDblclick:false,ready:updateCropPreview,crop:updateCropPreview,cropend:updateCropPreview,zoom:updateCropPreview});"
+          if old in s:
+              s=s.replace(old,new,1)
+          else:
+              s=re.sub(r"S\.cropper=new Cropper\(\$\('#cropImage'\),\{.*?\}\);",new,s,count=1)
+
+          pattern=r"\$\('#saveImage'\)\.onclick=async\(\)=>\{.*?\};window\.addEventListener\('resize',renderGraph\);"
+          replacement="""$('#saveImage').onclick=async()=>{if(!cur())return toast('還沒有角色');toast('正在產生正方形預覽…');let stage=$('#stage'),oldHeight=stage.style.height,w=Math.round(stage.getBoundingClientRect().width);stage.classList.add('exporting');stage.style.height=w+'px';renderGraph();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));let canvas=await html2canvas(stage,{backgroundColor:S.bg,scale:Math.max(2,1200/w),useCORS:true});stage.style.height=oldHeight;stage.classList.remove('exporting');renderGraph();let out=document.createElement('canvas');out.width=out.height=1200;let ctx=out.getContext('2d');ctx.fillStyle=S.bg;ctx.fillRect(0,0,1200,1200);ctx.drawImage(canvas,0,0,1200,1200);let data=out.toDataURL('image/png');$('#exportImage').src=data;$('#openExportImage').onclick=()=>{let win=window.open();if(win){win.document.write(`<html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"margin:0;background:#111;display:grid;place-items:center;min-height:100vh\"><img src=\"${data}\" style=\"max-width:100%;height:auto\"></body></html>`);win.document.close()}else toast('瀏覽器阻擋了新分頁')};exportDlg.showModal();toast('預覽已產生，長按圖片即可儲存')};window.addEventListener('resize',renderGraph);"""
+          s,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
+          if n!=1:
+              raise SystemExit('saveImage handler patch failed')
+
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Improve mobile crop and image preview export"
+          git push
