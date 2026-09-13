@@ -1,0 +1,37 @@
+name: Patch longer relation lines
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-longer-relation-lines.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Increase graph radius
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+          replacements = {
+            "rx=Math.min(w*.41,205),ry=Math.min(h*.35,185)": "rx=Math.min(w*.45,220),ry=Math.min(h*.41,215)",
+            "let rx=Math.max(118,rc.width/2-48),ry=Math.max(108,Math.min(center.y-82,rc.height-center.y-54)),q=": "let rx=Math.max(128,rc.width/2-38),ry=Math.max(120,Math.min(center.y-64,rc.height-center.y-46)),q=",
+            "minQ=.58,maxQ=1": "minQ=.68,maxQ=1",
+            "rx=ids.length<=4?390:430,ry=ids.length<=4?350:400": "rx=ids.length<=4?430:460,ry=ids.length<=4?405:435"
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'Expected text not found: {old}')
+              s = s.replace(old, new)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Lengthen secondary character relation lines"
+          git push
