@@ -1,0 +1,34 @@
+name: Patch 360-degree secondary node drag
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-360-drag.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text()
+          s=s.replace('拖動頭像調整位置・點一下切換角色','副角色可 360° 拖動・點一下切換角色')
+          pattern=r"function moveNodeDrag\(e\)\{.*?\}async function endNodeDrag"
+          replacement="""function moveNodeDrag(e){let d=S.nodeDrag;if(!d||e.pointerId!==d.pointerId)return;let dx=(e.clientX-d.startX)/S.scale,dy=(e.clientY-d.startY)/S.scale;if(Math.hypot(dx,dy)>5)d.moved=true;let rc=$('#stage').getBoundingClientRect(),center=S.pos[S.focus]||{x:rc.width/2,y:rc.height/2+18},rawX=d.x+dx,rawY=d.y+dy,vx=rawX-center.x,vy=rawY-center.y;if(Math.abs(vx)<.001&&Math.abs(vy)<.001){vx=1;vy=0}let rx=Math.max(118,rc.width/2-48),ry=Math.max(108,Math.min(center.y-82,rc.height-center.y-54)),q=Math.sqrt((vx*vx)/(rx*rx)+(vy*vy)/(ry*ry)),minQ=.58,maxQ=1;if(q<minQ||q>maxQ){let target=Math.max(minQ,Math.min(maxQ,q||minQ)),k=target/(q||1);vx*=k;vy*=k}let x=center.x+vx,y=center.y+vy;S.pos[d.id]={x,y};d.node.style.left=x+'px';d.node.style.top=y+'px';drawEdges(linksFor(S.focus),S.focus)}async function endNodeDrag"""
+          ns,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
+          if n!=1:
+              raise SystemExit(f'Expected to patch moveNodeDrag once, got {n}')
+          p.write_text(ns)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Enable 360-degree radial dragging for secondary characters" || exit 0
+          git push
