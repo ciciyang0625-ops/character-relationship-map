@@ -1,0 +1,56 @@
+name: Patch draggable relationship nodes
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-draggable.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace('點頭像切換角色視角', '拖動頭像調整位置・點一下切換角色')
+          s = s.replace('<div class="tools"><button id="zout" class="tool">−</button><button id="reset" class="tool">◎</button><button id="zin" class="tool">＋</button></div>', '<div class="tools"><button id="layoutReset" class="tool" title="重設排列">↺</button><button id="zout" class="tool">−</button><button id="reset" class="tool">◎</button><button id="zin" class="tool">＋</button></div>')
+
+          s = s.replace('.node{position:absolute;width:92px;text-align:center;transform:translate(-50%,-50%);cursor:pointer;transition:', '.node{position:absolute;width:92px;text-align:center;transform:translate(-50%,-50%);cursor:grab;touch-action:none;user-select:none;transition:')
+          s = s.replace('.nava{width:64px;', '.node.dragging{cursor:grabbing;transition:none!important;z-index:12;transform:translate(-50%,-50%) scale(1.05)}.node.dragging .nava{box-shadow:0 12px 30px #1f1b1745}.node.squish{animation:node-squish .35s cubic-bezier(.2,1.45,.3,1)}@keyframes node-squish{0%{transform:translate(-50%,-50%) scale(.91,1.08)}60%{transform:translate(-50%,-50%) scale(1.06,.96)}100%{transform:translate(-50%,-50%) scale(1)}}.nava{width:64px;', 1)
+
+          s = s.replace('scale:1,x:0,y:0};', 'scale:1,x:0,y:0,layouts:{},nodeDrag:null,pos:{}};')
+          s = s.replace('bgImage:S.bgImage},\'main\')', 'bgImage:S.bgImage,layouts:S.layouts},\'main\')')
+          s = s.replace('if(v)Object.assign(S,v);S.rels=', 'if(v)Object.assign(S,v);S.layouts=S.layouts||{};S.rels=')
+
+          graph_re = re.compile(r"function renderGraph\(\)\{.*?\}function showView", re.S)
+          graph_new = r'''function autoPositions(ids,w,h,cid){let cx=w/2,cy=h/2+18,rx=Math.min(w*.37,180),ry=Math.min(h*.28,135),p={[cid]:{x:cx,y:cy}};ids.forEach((id,i)=>{let a=-Math.PI/2+i*Math.PI*2/Math.max(ids.length,1);p[id]={x:cx+Math.cos(a)*rx,y:cy+Math.sin(a)*ry}});return p}function layoutFor(focus){return S.layouts[focus]||(S.layouts[focus]={})}function buildPositions(ids,cid,w,h){let p=autoPositions(ids,w,h,cid),lay=layoutFor(cid);[cid,...ids].forEach(id=>{let q=lay[id];if(q)p[id]={x:q.x*w,y:q.y*h}});return p}function drawEdges(ls,cid){let out='';ls.forEach(r=>{let a=S.pos[cid],b=S.pos[other(r,cid)];if(!a||!b)return;let dash=r.style==='dashed'?'9 7':r.style==='dotted'?'2 6':'';out+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${r.color||'#8a8178'}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${dash}"/>`;let lab=labelFrom(r,cid);if(lab)out+=`<text x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2-7}" text-anchor="middle" class="reltext" fill="${S.ink}" stroke="${S.bg}">${esc(lab)}</text>`});$('#edges').innerHTML=out}function renderGraph(){let nodes=$('#nodes'),emp=$('#empty'),c=cur();if(!c){nodes.innerHTML='';$('#edges').innerHTML='';emp.classList.remove('hidden');return}let ls=linksFor(c.id),ids=ls.map(r=>other(r,c.id));emp.classList.toggle('hidden',ids.length>0);let rc=$('#stage').getBoundingClientRect();S.pos=buildPositions(ids,c.id,rc.width,rc.height);nodes.style.transform=`translate(${S.x}px,${S.y}px) scale(${S.scale})`;$('#edges').style.transform=`translate(${S.x}px,${S.y}px) scale(${S.scale})`;$('#edges').style.transformOrigin='0 0';nodes.innerHTML=[c.id,...ids].map(id=>{let ch=S.chars.find(x=>x.id===id),p=S.pos[id];return `<div class="node ${id===c.id?'center':''}" data-id="${id}" style="left:${p.x}px;top:${p.y}px"><div class="nava" style="background:${ch.color}">${photo(ch)}</div><span class="nname">${esc(ch.name)}</span></div>`}).join('');nodes.querySelectorAll('.node').forEach(n=>n.addEventListener('pointerdown',startNodeDrag));drawEdges(ls,c.id)}function startNodeDrag(e){e.preventDefault();e.stopPropagation();let n=e.currentTarget,id=n.dataset.id,p=S.pos[id];S.nodeDrag={id,node:n,startX:e.clientX,startY:e.clientY,x:p.x,y:p.y,moved:false,pointerId:e.pointerId};n.setPointerCapture(e.pointerId);n.classList.add('dragging')}function moveNodeDrag(e){let d=S.nodeDrag;if(!d||e.pointerId!==d.pointerId)return;let dx=(e.clientX-d.startX)/S.scale,dy=(e.clientY-d.startY)/S.scale;if(Math.hypot(dx,dy)>5)d.moved=true;let rc=$('#stage').getBoundingClientRect(),x=Math.max(46,Math.min(rc.width-46,d.x+dx)),y=Math.max(78,Math.min(rc.height-44,d.y+dy));S.pos[d.id]={x,y};d.node.style.left=x+'px';d.node.style.top=y+'px';drawEdges(linksFor(S.focus),S.focus)}async function endNodeDrag(e){let d=S.nodeDrag;if(!d||e.pointerId!==d.pointerId)return;d.node.classList.remove('dragging');if(d.moved){let rc=$('#stage').getBoundingClientRect();layoutFor(S.focus)[d.id]={x:S.pos[d.id].x/rc.width,y:S.pos[d.id].y/rc.height};await persist();d.node.classList.add('squish');setTimeout(()=>d.node&&d.node.classList.remove('squish'),380)}else switchFocus(d.id);S.nodeDrag=null}function showView'''
+          s, n = graph_re.subn(graph_new, s, count=1)
+          assert n == 1, 'renderGraph patch failed'
+
+          s = s.replace("$('#reset').onclick=()=>{S.scale=1;S.x=S.y=0;renderGraph();triggerJelly()};", "$('#reset').onclick=()=>{S.scale=1;S.x=S.y=0;renderGraph();triggerJelly()};$('#layoutReset').onclick=async()=>{if(!S.focus)return;delete S.layouts[S.focus];await persist();renderGraph();triggerJelly();toast('排列已重設')};")
+
+          drag_re = re.compile(r"let drag=false,sx=0,sy=0,ox=0,oy=0;\$\('#stage'\)\.addEventListener\('pointerdown'.*?\$\('#stage'\)\.addEventListener\('pointerup',\(\)=>drag=false\);", re.S)
+          drag_new = "$('#stage').addEventListener('pointerdown',e=>{if(e.target.closest('.node')||e.target.closest('.tools'))return;S.canvasDrag={sx:e.clientX,sy:e.clientY,ox:S.x,oy:S.y,pointerId:e.pointerId};$('#stage').setPointerCapture(e.pointerId)});$('#stage').addEventListener('pointermove',e=>{if(S.nodeDrag){moveNodeDrag(e);return}let d=S.canvasDrag;if(!d||e.pointerId!==d.pointerId)return;S.x=d.ox+e.clientX-d.sx;S.y=d.oy+e.clientY-d.sy;renderGraph()});$('#stage').addEventListener('pointerup',e=>{if(S.nodeDrag){endNodeDrag(e);return}S.canvasDrag=null});$('#stage').addEventListener('pointercancel',e=>{if(S.nodeDrag)endNodeDrag(e);S.canvasDrag=null});"
+          s, n = drag_re.subn(drag_new, s, count=1)
+          assert n == 1, 'stage drag patch failed'
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patched page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Enable draggable avatar positions"
+          git push
