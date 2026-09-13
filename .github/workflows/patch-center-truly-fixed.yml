@@ -1,0 +1,38 @@
+name: Patch center truly fixed
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-center-truly-fixed.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          old="nodes.style.transform=`translate(${S.x}px,${S.y}px) scale(${S.scale})`;$('#edges').style.transform=`translate(${S.x}px,${S.y}px) scale(${S.scale})`;$('#edges').style.transformOrigin='0 0';"
+          new="let graphOrigin=`${S.pos[c.id].x}px ${S.pos[c.id].y}px`;nodes.style.transform=`scale(${S.scale})`;nodes.style.transformOrigin=graphOrigin;$('#edges').style.transform=`scale(${S.scale})`;$('#edges').style.transformOrigin=graphOrigin;"
+          if old not in s:
+              raise SystemExit('graph transform pattern not found')
+          s=s.replace(old,new,1)
+          old2="$('#stage').addEventListener('pointerdown',e=>{if(e.target.closest('.node')||e.target.closest('.tools'))return;S.canvasDrag={sx:e.clientX,sy:e.clientY,ox:S.x,oy:S.y,pointerId:e.pointerId};$('#stage').setPointerCapture(e.pointerId)});$('#stage').addEventListener('pointermove',e=>{if(S.nodeDrag){moveNodeDrag(e);return}let d=S.canvasDrag;if(!d||e.pointerId!==d.pointerId)return;S.x=d.ox+e.clientX-d.sx;S.y=d.oy+e.clientY-d.sy;renderGraph()});$('#stage').addEventListener('pointerup',e=>{if(S.nodeDrag){endNodeDrag(e);return}S.canvasDrag=null});$('#stage').addEventListener('pointercancel',e=>{if(S.nodeDrag)endNodeDrag(e);S.canvasDrag=null});"
+          new2="$('#stage').addEventListener('pointermove',e=>{if(S.nodeDrag)moveNodeDrag(e)});$('#stage').addEventListener('pointerup',e=>{if(S.nodeDrag)endNodeDrag(e)});$('#stage').addEventListener('pointercancel',e=>{if(S.nodeDrag)endNodeDrag(e)});"
+          if old2 not in s:
+              raise SystemExit('canvas drag pattern not found')
+          s=s.replace(old2,new2,1)
+          s=s.replace('副角色可 360° 拖動','中心固定・副角色可 360° 拖動')
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Keep center character fixed while dragging graph" || exit 0
+          git push
