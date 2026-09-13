@@ -1,0 +1,86 @@
+name: Improve mobile relation flow and square export
+on:
+  push:
+    paths:
+      - '.github/workflows/mobile-flow-square-export.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch mobile UX
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text()
+
+          # Mobile graph slightly shorter so actions are reachable without extra scrolling.
+          s=s.replace('height:min(52dvh,520px);min-height:330px', 'height:min(44dvh,440px);min-height:300px')
+
+          # Add mobile-friendly quick action styles and export styling.
+          marker='.panel-title h2{font-size:14px;margin:0}'
+          add='''.panel-title h2{font-size:14px;margin:0}.quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 10px}.quick-actions .primary,.quick-actions .ghost{min-height:44px;font-size:11px}.index-search{margin:0 0 10px!important}.stage.exporting .tools{display:none!important}.stage.exporting .stage-sub{display:none!important}'''
+          if marker in s:
+              s=s.replace(marker,add,1)
+
+          # Replace the network header with two direct actions.
+          s=re.sub(
+              r'<div id="view-network" class="view active"><div class="panel-title"><h2>目前關係網</h2><button id="addRel" class="primary">＋ 加角色</button></div>',
+              '<div id="view-network" class="view active"><div class="panel-title"><h2>目前關係網</h2></div><div class="quick-actions"><button id="addRel" class="primary">＋ 加既有角色</button><button id="quickAddChar" class="ghost">＋ 新角色</button></div>',
+              s, count=1)
+
+          # Turn all-characters page into a searchable index.
+          s=s.replace('<h2>全部角色</h2><div class="small">角色只建立一次，之後關係都直接選頭像。</div>', '<h2>角色索引</h2><div class="small">搜尋角色，點一下直接查看或修改他的關係網。</div>',1)
+          s=s.replace('<div id="characterList" class="character-list"></div>', '<input id="charSearch" class="index-search" type="search" placeholder="搜尋角色名稱…"><div id="characterList" class="character-list"></div>',1)
+          s=s.replace('data-view="characters">全部角色</button>', 'data-view="characters">角色索引</button>',1)
+
+          # Add state for create-from-current-network flow and search.
+          s=s.replace("bgImage:null,scale:1,x:0,y:0", "bgImage:null,scale:1,x:0,y:0,createFromNetwork:false,charQuery:''",1)
+
+          # Searchable character index.
+          old="function renderCharacters(){let box=$('#characterList');box.innerHTML=S.chars.length?S.chars.map(c=>`<div class=\"char-row ${c.id===S.focus?'active':''}\" data-id=\"${c.id}\"><div class=\"miniava\" style=\"background:${c.color}\">${photo(c)}</div><div><div class=\"char-name\">${esc(c.name)}</div><div class=\"char-hint\">點一下切換到他的關係網</div></div><button class=\"delete\" data-del=\"${c.id}\">×</button></div>`).join(''):'<div class=\"small\">還沒有角色。</div>';"
+          new="function renderCharacters(){let box=$('#characterList'),q=(S.charQuery||'').trim().toLowerCase(),shown=q?S.chars.filter(c=>c.name.toLowerCase().includes(q)):S.chars;box.innerHTML=shown.length?shown.map(c=>`<div class=\"char-row ${c.id===S.focus?'active':''}\" data-id=\"${c.id}\"><div class=\"miniava\" style=\"background:${c.color}\">${photo(c)}</div><div><div class=\"char-name\">${esc(c.name)}</div><div class=\"char-hint\">查看／修改這個角色的關係網</div></div><button class=\"delete\" data-del=\"${c.id}\">×</button></div>`).join(''):`<div class=\"small\">${S.chars.length?'找不到符合的角色。':'還沒有角色。'}</div>`;"
+          if old in s:
+              s=s.replace(old,new,1)
+          else:
+              s=re.sub(r"function renderCharacters\(\)\{let box=\$\('#characterList'\);box\.innerHTML=.*?;\$\$\('\.char-row'\)", new+"$$('.char-row')", s, count=1)
+
+          # Make character creation aware of where it was launched.
+          s=s.replace("function openCharacter(){S.editChar=null;", "function openCharacter(fromNetwork=false){S.createFromNetwork=fromNetwork;S.editChar=null;",1)
+
+          # After creating a character from the current network, immediately open relationship editor with it selected.
+          old_save="async function saveCharacter(){let name=$('#charName').value.trim();if(!name)return toast('請輸入角色名稱');let ph=await readImage($('#charPhoto').files[0]);let c={id:uid(),name,photo:ph,color:$('#charColor').value};S.chars.push(c);if(!S.focus)S.focus=c.id;await persist();charDlg.close();render();toast('角色已新增')}"
+          new_save="async function saveCharacter(){let name=$('#charName').value.trim();if(!name)return toast('請輸入角色名稱');let ph=await readImage($('#charPhoto').files[0]),previousFocus=S.focus,fromNetwork=S.createFromNetwork;let c={id:uid(),name,photo:ph,color:$('#charColor').value};S.chars.push(c);if(!S.focus)S.focus=c.id;S.createFromNetwork=false;await persist();charDlg.close();render();toast('角色已新增');if(fromNetwork&&previousFocus&&previousFocus!==c.id){S.focus=previousFocus;await persist();render();setTimeout(()=>openRelation(null,c.id),120)}}"
+          if old_save in s:
+              s=s.replace(old_save,new_save,1)
+
+          # Allow preselecting the newly created character in relationship editor.
+          s=s.replace("function openRelation(id=null){let c=cur();", "function openRelation(id=null,preselect=null){let c=cur();",1)
+          s=s.replace("S.pick=r?other(r,c.id):null;", "S.pick=r?other(r,c.id):preselect;",1)
+          s=s.replace("if(r)fillRelationFields(r);else $('#relFields').classList.add('hidden');relDlg.showModal()", "if(r||S.pick)fillRelationFields(r);else $('#relFields').classList.add('hidden');relDlg.showModal()",1)
+
+          # Wire quick-add and search.
+          s=s.replace("$('#addChar').onclick=openCharacter;", "$('#addChar').onclick=()=>openCharacter(false);$('#quickAddChar').onclick=()=>openCharacter(true);",1)
+          s=s.replace("$$('.navbtn').forEach", "$('#charSearch').oninput=e=>{S.charQuery=e.target.value;renderCharacters()};$$('.navbtn').forEach",1)
+
+          # Square export: temporarily make the live graph square and re-layout before capture.
+          old_export=re.search(r"\$\('#saveImage'\)\.onclick=async\(\)=>\{.*?toast\('圖片已儲存'\)\}",s)
+          if old_export:
+              new_export="""$('#saveImage').onclick=async()=>{if(!cur())return toast('還沒有角色');toast('正在產生正方形圖片…');let stage=$('#stage'),oldHeight=stage.style.height,w=Math.round(stage.getBoundingClientRect().width);stage.classList.add('exporting');stage.style.height=w+'px';renderGraph();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));let canvas=await html2canvas(stage,{backgroundColor:S.bg,scale:Math.max(2,1200/w),useCORS:true});stage.style.height=oldHeight;stage.classList.remove('exporting');renderGraph();let out=document.createElement('canvas');out.width=out.height=1200;let ctx=out.getContext('2d');ctx.fillStyle=S.bg;ctx.fillRect(0,0,1200,1200);ctx.drawImage(canvas,0,0,1200,1200);let a=document.createElement('a');a.href=out.toDataURL('image/png');a.download=`${cur().name}-關係網-1x1.png`;a.click();toast('正方形圖片已儲存')}"""
+              s=s[:old_export.start()]+new_export+s[old_export.end():]
+
+          p.write_text(s)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Simplify mobile flow and export square graphs"
+            git push
+          fi
