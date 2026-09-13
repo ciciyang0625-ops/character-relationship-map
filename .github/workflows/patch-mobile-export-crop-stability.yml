@@ -1,0 +1,75 @@
+name: Patch mobile export and crop stability
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          extra_css = r'''
+          .crop-zoom-control{margin:8px 0 2px}.crop-zoom-control input[type=range]{padding:0;height:34px;accent-color:var(--accent)}
+          .crop-area,.crop-area *{touch-action:none!important}
+          .export-preview img{-webkit-touch-callout:default!important;user-select:auto!important;-webkit-user-select:auto!important;touch-action:manipulation!important}
+          @media(max-width:759px){
+            input:not([type=color]):not([type=range]),select,textarea{font-size:16px!important}
+            .sheet{overscroll-behavior:contain}
+            .crop-area{height:280px}
+            .cropper-point{width:22px!important;height:22px!important;margin:-5px 0 0 -5px!important}
+          }
+          '''
+          if '.crop-zoom-control{' not in s:
+              s = s.replace('</style>', extra_css + '</style>', 1)
+
+          old_crop_html = '<div id="cropArea" class="crop-area hidden"><img id="cropImage" alt="頭像裁切"></div><div id="preview" class="preview">預覽</div>'
+          new_crop_html = '<div id="cropArea" class="crop-area hidden"><img id="cropImage" alt="頭像裁切"></div><label class="crop-zoom-control">照片縮放<input id="cropZoom" type="range" min="0.1" max="3" step="0.01" value="1"></label><div id="preview" class="preview">預覽</div>'
+          if old_crop_html in s:
+              s = s.replace(old_crop_html, new_crop_html, 1)
+          s = s.replace('拖動圖片調整位置，雙指或滾輪可縮放', '拖動圖片調整位置；照片縮放請用上方滑桿')
+
+          if 'function setupCropZoom()' not in s:
+              marker = 'async function cropAvatar()'
+              helper = r'''function setupCropZoom(){if(!S.cropper)return;try{let d=S.cropper.getImageData(),z=$('#cropZoom'),base=d.width/d.naturalWidth;z.min=Math.max(.05,base*.55);z.max=Math.max(base*3.5,base+.25);z.step=.01;z.value=base;z.dataset.last=base}catch(e){}}'''
+              s = s.replace(marker, helper + marker, 1)
+
+          s = s.replace("$('#cropArea').classList.add('hidden');if(S.cropper)", "$('#cropArea').classList.add('hidden');if($('#cropZoom')){$('#cropZoom').value=1;$('#cropZoom').dataset.last='1'}if(S.cropper)", 1)
+
+          crop_pattern = re.compile(r"\$\('#charPhoto'\)\.onchange=e=>\{.*?\};\$\$\('\.navbtn'\)", re.S)
+          crop_repl = r'''$('#charPhoto').onchange=e=>{let f=e.target.files[0];if(!f)return;let url=URL.createObjectURL(f);$('#cropImage').src=url;$('#cropArea').classList.remove('hidden');if(S.cropper)S.cropper.destroy();S.cropper=new Cropper($('#cropImage'),{aspectRatio:1,viewMode:1,dragMode:'move',autoCropArea:.58,background:false,responsive:true,restore:false,cropBoxMovable:true,cropBoxResizable:true,minCropBoxWidth:54,minCropBoxHeight:54,zoomable:true,zoomOnTouch:false,zoomOnWheel:false,toggleDragModeOnDblclick:false,ready(){setupCropZoom();updateCropPreview()},crop:updateCropPreview,cropend:updateCropPreview});};$('#cropZoom').oninput=e=>{if(!S.cropper)return;let v=+e.target.value;if(!Number.isFinite(v))return;try{S.cropper.zoomTo(v);e.target.dataset.last=v;updateCropPreview()}catch(err){}};$$('.navbtn')'''
+          s, n = crop_pattern.subn(crop_repl, s, count=1)
+          if n != 1:
+              raise SystemExit('Could not patch cropper handler')
+
+          export_helpers = r'''function exportLoadImage(src){return new Promise((res,rej)=>{let i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src})}function exportRoundRect(ctx,x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}function exportCover(ctx,img,x,y,w,h){let ir=img.width/img.height,br=w/h,sx=0,sy=0,sw=img.width,sh=img.height;if(ir>br){sw=img.height*br;sx=(img.width-sw)/2}else{sh=img.width/br;sy=(img.height-sh)/2}ctx.drawImage(img,sx,sy,sw,sh,x,y,w,h)}async function exportDrawAvatar(ctx,ch,p,r){ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.clip();ctx.fillStyle=ch.color||'#aaa';ctx.fillRect(p.x-r,p.y-r,r*2,r*2);if(ch.photo){try{let img=await exportLoadImage(ch.photo);exportCover(ctx,img,p.x-r,p.y-r,r*2,r*2)}catch(e){}}else{ctx.fillStyle='#fff';ctx.font=`800 ${Math.max(26,r*.48)}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText((ch.name||'?').slice(0,2),p.x,p.y)}ctx.restore();ctx.strokeStyle='rgba(255,255,255,.96)';ctx.lineWidth=7;ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.stroke();ctx.font='700 28px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';let t=ch.name||'',tw=ctx.measureText(t).width+34,th=48,ty=p.y+r+38;ctx.fillStyle='rgba(255,255,255,.9)';exportRoundRect(ctx,p.x-tw/2,ty-th/2,tw,th,20);ctx.fill();ctx.fillStyle=S.ink||'#222';ctx.fillText(t,p.x,ty)}async function buildExportImage(){let size=1200,canvas=document.createElement('canvas');canvas.width=canvas.height=size;let ctx=canvas.getContext('2d');ctx.fillStyle=S.bg||'#f4f1eb';ctx.fillRect(0,0,size,size);if(S.bgImage){try{let bg=await exportLoadImage(S.bgImage);ctx.save();ctx.globalAlpha=.24;exportCover(ctx,bg,0,0,size,size);ctx.restore()}catch(e){}}let c=cur();if(!c)throw new Error('no character');let ls=linksFor(c.id),ids=ls.map(r=>other(r,c.id)),cx=600,cy=620,rx=ids.length<=4?340:390,ry=ids.length<=4?300:355,pos={[c.id]:{x:cx,y:cy}},lay=S.layouts[c.id]||{};ids.forEach((id,i)=>{let a=-Math.PI/2+i*Math.PI*2/Math.max(ids.length,1);pos[id]={x:cx+Math.cos(a)*rx,y:cy+Math.sin(a)*ry}});[c.id,...ids].forEach(id=>{let q=lay[id];if(q)pos[id]={x:Math.max(90,Math.min(1110,q.x*size)),y:Math.max(120,Math.min(1050,q.y*size))}});ctx.fillStyle=S.ink||'#222';ctx.font='800 44px system-ui';ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillText(`${c.name} 的關係網`,54,70);for(let r of ls){let a=pos[c.id],b=pos[other(r,c.id)];if(!a||!b)continue;ctx.save();ctx.strokeStyle=r.color||'#8a8178';ctx.lineWidth=5;ctx.lineCap='round';ctx.setLineDash(r.style==='dashed'?[20,14]:r.style==='dotted'?[4,13]:[]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.restore();let lab=labelFrom(r,c.id);if(lab){ctx.font='700 28px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';let mx=(a.x+b.x)/2,my=(a.y+b.y)/2-14,tw=ctx.measureText(lab).width+30;ctx.fillStyle='rgba(255,255,255,.9)';exportRoundRect(ctx,mx-tw/2,my-22,tw,44,18);ctx.fill();ctx.fillStyle=S.ink||'#222';ctx.fillText(lab,mx,my)}}for(let id of [c.id,...ids]){let ch=S.chars.find(x=>x.id===id);if(ch&&pos[id])await exportDrawAvatar(ctx,ch,pos[id],id===c.id?76:58)}return canvas.toDataURL('image/png')}'''
+
+          if 'function buildExportImage()' not in s:
+              s = s.replace("$('#saveImage').onclick=async()=>{", export_helpers + "$('#saveImage').onclick=async()=>{", 1)
+
+          export_pattern = re.compile(r"\$\('#saveImage'\)\.onclick=async\(\)=>\{.*?\};window\.addEventListener", re.S)
+          export_repl = r'''$('#saveImage').onclick=async()=>{if(!cur())return toast('還沒有角色');toast('正在產生正方形預覽…');try{let data=await buildExportImage();$('#exportImage').src=data;$('#openExportImage').onclick=()=>{let win=window.open();if(win){win.document.write(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="${data}" style="max-width:100%;height:auto;-webkit-touch-callout:default"></body></html>`);win.document.close()}else toast('瀏覽器阻擋了新分頁')};exportDlg.showModal();toast('預覽已產生，長按圖片即可儲存')}catch(err){console.error(err);toast('產生圖片失敗，請再試一次')}};window.addEventListener'''
+          s, n = export_pattern.subn(export_repl, s, count=1)
+          if n != 1:
+              raise SystemExit('Could not patch export handler')
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Fix mobile export preview and crop interactions"
+          git push
