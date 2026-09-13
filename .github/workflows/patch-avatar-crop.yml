@@ -1,0 +1,76 @@
+name: Patch avatar cropping
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-avatar-crop.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add Cropper.js avatar editor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          if 'cropper.min.css' not in s:
+              s=s.replace(
+                  '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>',
+                  '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>\n<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css">'
+              )
+
+          if '.crop-area{' not in s:
+              s=s.replace(
+                  '.preview{width:96px;height:96px;border-radius:50%;overflow:hidden;background:#eee;margin:12px auto;display:grid;place-items:center;font-size:11px}',
+                  '.crop-area{height:300px;margin:10px 0;border-radius:18px;overflow:hidden;background:#eee;position:relative}.crop-area img{display:block;max-width:100%}.cropper-view-box,.cropper-face{border-radius:50%}.cropper-line,.cropper-point{background-color:var(--accent)}.preview{width:96px;height:96px;border-radius:50%;overflow:hidden;background:#eee;margin:12px auto;display:grid;place-items:center;font-size:11px}'
+              )
+
+          old='<label>角色照片<input id="charPhoto" type="file" accept="image/*"></label><div id="preview" class="preview">預覽</div>'
+          new='<label>角色照片<input id="charPhoto" type="file" accept="image/*"></label><div id="cropArea" class="crop-area hidden"><img id="cropImage" alt="頭像裁切"></div><div id="preview" class="preview">預覽</div><div class="small" style="text-align:center;margin-top:-6px">拖動圖片調整位置，雙指或滾輪可縮放</div>'
+          if old in s:
+              s=s.replace(old,new,1)
+
+          if 'cropper.min.js' not in s:
+              s=s.replace(
+                  '<script>\nconst $=',
+                  '<script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>\n<script>\nconst $='
+              )
+
+          s=s.replace(
+              "bgImage:null,scale:1,x:0,y:0,createFromNetwork:false,charQuery:'',layouts:{},nodeDrag:null,pos:{}",
+              "bgImage:null,scale:1,x:0,y:0,createFromNetwork:false,charQuery:'',layouts:{},nodeDrag:null,pos:{},cropper:null"
+          )
+
+          old="function openCharacter(fromNetwork=false){S.createFromNetwork=fromNetwork;S.editChar=null;$('#charDlgTitle').textContent='新增角色';$('#charName').value='';$('#charPhoto').value='';$('#charColor').value='#7d7369';$('#preview').innerHTML='預覽';charDlg.showModal()}"
+          new="function openCharacter(fromNetwork=false){S.createFromNetwork=fromNetwork;S.editChar=null;$('#charDlgTitle').textContent='新增角色';$('#charName').value='';$('#charPhoto').value='';$('#charColor').value='#7d7369';$('#preview').innerHTML='預覽';$('#cropArea').classList.add('hidden');if(S.cropper){S.cropper.destroy();S.cropper=null}charDlg.showModal()}"
+          if old in s:
+              s=s.replace(old,new,1)
+
+          marker="async function readImage(file){"
+          cropfn="""function updateCropPreview(){if(!S.cropper)return;try{let c=S.cropper.getCroppedCanvas({width:180,height:180,imageSmoothingEnabled:true,imageSmoothingQuality:'high'});$('#preview').innerHTML=`<img src=\"${c.toDataURL('image/jpeg',.82)}\">`}catch(e){}}async function cropAvatar(){if(!S.cropper)return null;let c=S.cropper.getCroppedCanvas({width:420,height:420,imageSmoothingEnabled:true,imageSmoothingQuality:'high'});return c.toDataURL('image/jpeg',.84)}"""
+          if 'function updateCropPreview()' not in s and marker in s:
+              s=s.replace(marker,cropfn+marker,1)
+
+          s=s.replace(
+              "let ph=await readImage($('#charPhoto').files[0]),previousFocus=S.focus,fromNetwork=S.createFromNetwork;",
+              "let ph=await cropAvatar(),previousFocus=S.focus,fromNetwork=S.createFromNetwork;"
+          )
+
+          old_handler="$('#charPhoto').onchange=async e=>{let ph=await readImage(e.target.files[0]);$('#preview').innerHTML=ph?`<img src=\"${ph}\">`:'預覽'};"
+          new_handler="$('#charPhoto').onchange=e=>{let f=e.target.files[0];if(!f)return;let url=URL.createObjectURL(f);$('#cropImage').src=url;$('#cropArea').classList.remove('hidden');if(S.cropper)S.cropper.destroy();S.cropper=new Cropper($('#cropImage'),{aspectRatio:1,viewMode:1,dragMode:'move',autoCropArea:1,background:false,responsive:true,restore:false,ready:updateCropPreview,cropend:updateCropPreview,zoom:updateCropPreview});};"
+          if old_handler in s:
+              s=s.replace(old_handler,new_handler,1)
+
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Add mobile avatar cropper" || exit 0
+          git push
