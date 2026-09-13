@@ -1,0 +1,37 @@
+name: Patch center zoom lock
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-center-zoom-lock.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          s=s.replace('let cx=w/2,cy=h/2+20,rx=', 'let cx=w/2,cy=h/2,rx=')
+          s=s.replace("center=S.pos[S.focus]||{x:rc.width/2,y:rc.height/2+18}", "center=S.pos[S.focus]||{x:rc.width/2,y:rc.height/2}")
+          s=s.replace('cx=600,cy=620,rx=', 'cx=600,cy=600,rx=')
+          s=s.replace('拖動副角色調整位置・中心角色固定', '拖動副角色調整位置・縮放時中心角色固定正中央')
+          # Hard-lock the focus node to the exact stage center before applying scale.
+          old="S.pos=buildPositions(ids,c.id,rc.width,rc.height);let graphOrigin=`${S.pos[c.id].x}px ${S.pos[c.id].y}px`;"
+          new="S.pos=buildPositions(ids,c.id,rc.width,rc.height);S.pos[c.id]={x:rc.width/2,y:rc.height/2};let graphOrigin=`${rc.width/2}px ${rc.height/2}px`;"
+          if old in s:
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Keep center node fixed during zoom"
+          git push
