@@ -1,0 +1,39 @@
+name: Patch mobile graph safe area
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-mobile-graph-safe-area.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Widen graph and reserve top drag area
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          pairs=[
+            ('.stage-wrap{padding:10px 10px 0}', '.stage-wrap{padding:8px 3px 0}'),
+            ('function autoPositions(ids,w,h,cid){let cx=w/2,cy=h/2,rx=Math.min(w*.45,220),ry=Math.min(h*.41,215),p={[cid]:{x:cx,y:cy}};', "function graphCenter(w,h){let mobile=window.innerWidth<760;return{x:w/2,y:mobile?Math.max(h*.58,h/2+28):h/2}}function graphRadius(w,h,c){let rx=Math.max(128,Math.min(w*.46,w/2-38)),ry=Math.max(116,Math.min(c.y-98,h-c.y-48));return{rx,ry}}function autoPositions(ids,w,h,cid){let gc=graphCenter(w,h),cx=gc.x,cy=gc.y,gr=graphRadius(w,h,gc),rx=gr.rx,ry=gr.ry,p={[cid]:{x:cx,y:cy}};"),
+            ("S.pos[c.id]={x:rc.width/2,y:rc.height/2};let graphOrigin=`${rc.width/2}px ${rc.height/2}px`;", "let gc=graphCenter(rc.width,rc.height);S.pos[c.id]={x:gc.x,y:gc.y};let graphOrigin=`${gc.x}px ${gc.y}px`;"),
+            ("let rc=$('#stage').getBoundingClientRect(),center=S.pos[S.focus]||{x:rc.width/2,y:rc.height/2},rawX=d.x+dx,rawY=d.y+dy,vx=rawX-center.x,vy=rawY-center.y;", "let rc=$('#stage').getBoundingClientRect(),gc=graphCenter(rc.width,rc.height),center=S.pos[S.focus]||gc,rawX=d.x+dx,rawY=d.y+dy,vx=rawX-center.x,vy=rawY-center.y;"),
+            ("let rx=Math.max(128,rc.width/2-38),ry=Math.max(120,Math.min(center.y-64,rc.height-center.y-46)),q=Math.sqrt((vx*vx)/(rx*rx)+(vy*vy)/(ry*ry)),minQ=.68,maxQ=1;", "let gr=graphRadius(rc.width,rc.height,center),rx=gr.rx,ry=gr.ry,q=Math.sqrt((vx*vx)/(rx*rx)+(vy*vy)/(ry*ry)),minQ=.68,maxQ=1;")
+          ]
+          for old,new in pairs:
+              if old not in s:
+                  raise SystemExit('pattern not found: '+old[:100])
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m 'Widen mobile graph and reserve top drag area'
+          git push
