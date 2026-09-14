@@ -1,0 +1,42 @@
+name: Patch network empty text and buttons
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-network-empty-buttons.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update index
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+          old_buttons = '<div class="quick-actions"><button id="addRel" class="primary">＋ 加既有角色</button><button id="quickAddChar" class="ghost">＋ 新角色</button></div>'
+          new_buttons = '<div class="quick-actions"><button id="addRel" class="ghost">＋ 加既有角色</button><button id="quickAddChar" class="primary">＋ 新角色</button></div>'
+          old_empty = "function renderCurrent(){let c=cur();$('#currentCard').innerHTML=c?`<div class=\"current-card\"><div class=\"miniava\" >${photo(c)}</div><div><div class=\"current-name\">${esc(c.name)}</div><div class=\"current-info\">現在顯示 ${linksFor(c.id).length} 個角色</div></div></div>`:'<div class=\"small\">先到「全部角色」新增角色。</div>'}"
+          new_empty = "function renderCurrent(){let c=cur();$('#currentCard').innerHTML=c?`<div class=\"current-card\"><div class=\"miniava\" >${photo(c)}</div><div><div class=\"current-name\">${esc(c.name)}</div><div class=\"current-info\">現在顯示 ${linksFor(c.id).length} 個角色</div></div></div>`:''}"
+          if old_buttons not in s:
+              raise SystemExit('button block not found')
+          if old_empty not in s:
+              raise SystemExit('empty renderCurrent block not found')
+          s = s.replace(old_buttons, new_buttons, 1)
+          s = s.replace(old_empty, new_empty, 1)
+          p.write_text(s)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Simplify empty network state and prioritize new character" || exit 0
+          git push
