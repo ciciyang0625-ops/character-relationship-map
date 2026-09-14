@@ -1,0 +1,56 @@
+name: Patch complete dark theme
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-dark-theme.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch dark theme
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+
+          s=s.replace(':root{--bg:#f4f1eb;--ink:#27231f;--card:#fff;--soft:#f8f6f2;--line:#ded8cf;--muted:#80786f;--accent:#332e29;--safe:env(safe-area-inset-bottom,0px)}', ':root{--bg:#f4f1eb;--ink:#27231f;--card:#fff;--soft:#f8f6f2;--line:#ded8cf;--muted:#80786f;--accent:#332e29;--accent-ink:#fff;--safe:env(safe-area-inset-bottom,0px)}')
+          s=s.replace('.primary{border:1px solid var(--accent);background:var(--accent);color:#fff}', '.primary{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink)}')
+          s=s.replace('.navbtn.active{background:var(--accent);color:#fff;', '.navbtn.active{background:var(--accent);color:var(--accent-ink);')
+          s=s.replace('input,select{width:100%;border:1px solid var(--line);border-radius:13px;background:#fff;padding:11px 12px;outline:none}', 'input,select{width:100%;border:1px solid var(--line);border-radius:13px;background:var(--card);color:var(--ink);padding:11px 12px;outline:none}input::placeholder{color:var(--muted)}')
+          s=s.replace('.crop-area{height:300px;margin:10px 0;border-radius:18px;overflow:hidden;background:#eee;position:relative}', '.crop-area{height:300px;margin:10px 0;border-radius:18px;overflow:hidden;background:var(--soft);position:relative}')
+          s=s.replace('.export-preview{margin:14px auto 10px;max-width:520px;border-radius:18px;overflow:hidden;background:#eee;border:1px solid var(--line)}', '.export-preview{margin:14px auto 10px;max-width:520px;border-radius:18px;overflow:hidden;background:var(--soft);border:1px solid var(--line)}')
+          s=s.replace('.preview{width:96px;height:96px;border-radius:50%;overflow:hidden;background:#eee;', '.preview{width:96px;height:96px;border-radius:50%;overflow:hidden;background:var(--soft);')
+
+          marker="function uid(){return crypto.randomUUID?crypto.randomUUID():Date.now()+''+Math.random()}"
+          helper="function themeIsDark(hex){let h=String(hex||'').replace('#','');if(h.length===3)h=[...h].map(x=>x+x).join('');if(!/^[0-9a-fA-F]{6}$/.test(h))return false;let r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);return .2126*r+.7152*g+.0722*b<125}"
+          if helper not in s:
+              s=s.replace(marker, helper+marker)
+
+          old="function render(){if(!S.focus||!S.chars.some(c=>c.id===S.focus))S.focus=S.chars[0]?.id||null;document.documentElement.style.setProperty('--bg',S.bg);document.documentElement.style.setProperty('--ink',S.ink);document.documentElement.style.setProperty('--accent',S.ink);"
+          new="function render(){if(!S.focus||!S.chars.some(c=>c.id===S.focus))S.focus=S.chars[0]?.id||null;let root=document.documentElement,dark=themeIsDark(S.bg);root.style.setProperty('--bg',S.bg);root.style.setProperty('--ink',S.ink);root.style.setProperty('--card',dark?'#2a2927':'#fff');root.style.setProperty('--soft',dark?'#242321':'#f8f6f2');root.style.setProperty('--line',dark?'#4c4944':'#ded8cf');root.style.setProperty('--muted',dark?'#aaa49b':'#80786f');root.style.setProperty('--accent',dark?'#f1eee8':S.ink);root.style.setProperty('--accent-ink',dark?'#1f1f1d':'#fff');root.style.colorScheme=dark?'dark':'light';"
+          if old not in s:
+              raise SystemExit('render marker not found')
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Fix dark theme contrast"
+            git push
+          fi
