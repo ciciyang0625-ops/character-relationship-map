@@ -1,0 +1,90 @@
+name: Patch character size and export settings
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-size-export-settings.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          # 1) CSS: dynamic avatar sizes + settings cards
+          s=s.replace('.nava{width:64px;height:64px;', '.nava{width:var(--side-avatar,64px);height:var(--side-avatar,64px);', 1)
+          s=s.replace('.node.center .nava{width:86px;height:86px}', '.node.center .nava{width:var(--main-avatar,86px);height:var(--main-avatar,86px)}', 1)
+          s=s.replace('.nname{display:inline-block;max-width:92px;', '.nname{display:inline-block;max-width:120px;', 1)
+          marker='.empty b{opacity:.55}\n.empty h3,.empty p{opacity:.72}\n'
+          extra='''\n.custom-block{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:16px;background:color-mix(in srgb,var(--card) 72%,transparent)}\n.custom-block h3{font-size:12px;margin:0 0 4px}.custom-block .small{margin-bottom:8px}.range-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin:10px 0}.range-row label{margin:0}.range-row output{min-width:42px;text-align:right;font-size:10px;color:var(--muted);font-weight:800}.range-row input[type=range]{padding:0;height:32px;accent-color:var(--accent)}.check-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.check-item{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--ink)}.check-item input{width:auto;margin:0}.export-aspect{margin:10px 0 0}\n'''
+          if extra.strip() not in s:
+              s=s.replace(marker, marker+extra, 1)
+
+          # 2) Replace style panel with expanded controls
+          old='''<div id="view-style" class="view"><div class="panel-title"><div><h2>外觀</h2><div class="small">簡單調背景就好。</div></div></div><div class="presets"><button data-bg="#f4f1eb" data-ink="#27231f">暖白</button><button data-bg="#edf3f8" data-ink="#203040">淡藍</button><button data-bg="#1f1f1d" data-ink="#f1eee8">深色</button></div><label>背景色<input id="bgColor" type="color"></label><label>背景圖片<input id="bgPhoto" type="file" accept="image/*"></label><button id="clearBg" class="ghost" style="width:100%">移除背景圖片</button></div>'''
+          new='''<div id="view-style" class="view"><div class="panel-title"><div><h2>外觀</h2><div class="small">調整關係網外觀與匯出圖片。</div></div></div><div class="presets"><button data-bg="#f4f1eb" data-ink="#27231f">暖白</button><button data-bg="#edf3f8" data-ink="#203040">淡藍</button><button data-bg="#1f1f1d" data-ink="#f1eee8">深色</button></div><label>背景色<input id="bgColor" type="color"></label><label>背景圖片<input id="bgPhoto" type="file" accept="image/*"></label><button id="clearBg" class="ghost" style="width:100%">移除背景圖片</button><div class="custom-block"><h3>角色大小</h3><div class="small">只改頭像顯示大小，不會改變角色位置。</div><div class="range-row"><label>主要角色<input id="mainSize" type="range" min="64" max="124" step="2"></label><output id="mainSizeOut">86px</output></div><div class="range-row"><label>副角色<input id="sideSize" type="range" min="44" max="96" step="2"></label><output id="sideSizeOut">64px</output></div></div><div class="custom-block"><h3>匯出設定</h3><div class="small">只影響下載圖片，不會改變目前畫布。</div><div class="check-grid"><label class="check-item"><input id="exportTitle" type="checkbox" checked>顯示標題</label><label class="check-item"><input id="exportNames" type="checkbox" checked>顯示角色名稱</label><label class="check-item" style="grid-column:1/-1"><input id="exportBg" type="checkbox" checked>顯示背景圖片</label></div><label class="export-aspect">圖片比例<select id="exportAspect"><option value="1:1">1:1 正方形</option><option value="3:4">3:4 直式</option><option value="16:9">16:9 橫式</option></select></label></div></div>'''
+          if old not in s: raise SystemExit('style panel target not found')
+          s=s.replace(old,new,1)
+
+          # 3) State and persistence
+          old_state="const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];const DB='character-map-simple-v2';const S={chars:[],rels:[],focus:null,editChar:null,editRel:null,pick:null,bg:'#f4f1eb',ink:'#27231f',bgImage:null,scale:1,x:0,y:0,createFromNetwork:false,charQuery:'',layouts:{},nodeDrag:null,pos:{},cropper:null};"
+          new_state="const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];const DB='character-map-simple-v2';const S={chars:[],rels:[],focus:null,editChar:null,editRel:null,pick:null,bg:'#f4f1eb',ink:'#27231f',bgImage:null,scale:1,x:0,y:0,createFromNetwork:false,charQuery:'',layouts:{},nodeDrag:null,pos:{},cropper:null,mainSize:86,sideSize:64,exportAspect:'1:1',exportTitle:true,exportNames:true,exportBg:true};"
+          if old_state not in s: raise SystemExit('state target not found')
+          s=s.replace(old_state,new_state,1)
+
+          old_persist="{chars:S.chars,rels:S.rels,focus:S.focus,bg:S.bg,ink:S.ink,bgImage:S.bgImage,layouts:S.layouts}"
+          new_persist="{chars:S.chars,rels:S.rels,focus:S.focus,bg:S.bg,ink:S.ink,bgImage:S.bgImage,layouts:S.layouts,mainSize:S.mainSize,sideSize:S.sideSize,exportAspect:S.exportAspect,exportTitle:S.exportTitle,exportNames:S.exportNames,exportBg:S.exportBg}"
+          if old_persist not in s: raise SystemExit('persist target not found')
+          s=s.replace(old_persist,new_persist,1)
+
+          old_load="if(v)Object.assign(S,v);S.layouts=S.layouts||{};S.rels=S.rels.map(r=>({...r,showA:r.showA!==false,showB:r.showB!==false}));render()"
+          new_load="if(v)Object.assign(S,v);S.layouts=S.layouts||{};S.mainSize=Number(S.mainSize)||86;S.sideSize=Number(S.sideSize)||64;S.exportAspect=S.exportAspect||'1:1';S.exportTitle=S.exportTitle!==false;S.exportNames=S.exportNames!==false;S.exportBg=S.exportBg!==false;S.rels=S.rels.map(r=>({...r,showA:r.showA!==false,showB:r.showB!==false}));render()"
+          if old_load not in s: raise SystemExit('load target not found')
+          s=s.replace(old_load,new_load,1)
+
+          # 4) Apply size/settings during render
+          old_render="document.documentElement.style.setProperty('--accent',S.ink);$('#stage').style.setProperty('--bgimg',S.bgImage?`url(\"${S.bgImage}\")`:'none');$('#bgColor').value=S.bg;renderCurrent();"
+          new_render="document.documentElement.style.setProperty('--accent',S.ink);document.documentElement.style.setProperty('--main-avatar',S.mainSize+'px');document.documentElement.style.setProperty('--side-avatar',S.sideSize+'px');$('#stage').style.setProperty('--bgimg',S.bgImage?`url(\"${S.bgImage}\")`:'none');$('#bgColor').value=S.bg;if($('#mainSize')){$('#mainSize').value=S.mainSize;$('#mainSizeOut').textContent=S.mainSize+'px';$('#sideSize').value=S.sideSize;$('#sideSizeOut').textContent=S.sideSize+'px';$('#exportAspect').value=S.exportAspect;$('#exportTitle').checked=S.exportTitle;$('#exportNames').checked=S.exportNames;$('#exportBg').checked=S.exportBg}renderCurrent();"
+          if old_render not in s: raise SystemExit('render settings target not found')
+          s=s.replace(old_render,new_render,1)
+
+          # 5) Add control listeners after clearBg
+          old_clear="$('#clearBg').onclick=async()=>{S.bgImage=null;await persist();render()};function zoom(d)"
+          new_clear="$('#clearBg').onclick=async()=>{S.bgImage=null;await persist();render()};$('#mainSize').oninput=e=>{S.mainSize=+e.target.value;$('#mainSizeOut').textContent=S.mainSize+'px';document.documentElement.style.setProperty('--main-avatar',S.mainSize+'px');persist()};$('#sideSize').oninput=e=>{S.sideSize=+e.target.value;$('#sideSizeOut').textContent=S.sideSize+'px';document.documentElement.style.setProperty('--side-avatar',S.sideSize+'px');persist()};$('#exportAspect').onchange=e=>{S.exportAspect=e.target.value;persist()};$('#exportTitle').onchange=e=>{S.exportTitle=e.target.checked;persist()};$('#exportNames').onchange=e=>{S.exportNames=e.target.checked;persist()};$('#exportBg').onchange=e=>{S.exportBg=e.target.checked;persist()};function zoom(d)"
+          if old_clear not in s: raise SystemExit('listeners target not found')
+          s=s.replace(old_clear,new_clear,1)
+
+          # 6) Export avatar names conditional
+          old_name="ctx.font='700 28px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';let t=ch.name||'',tw=ctx.measureText(t).width+34,th=48,ty=p.y+r+38;ctx.fillStyle='rgba(255,255,255,.9)';exportRoundRect(ctx,p.x-tw/2,ty-th/2,tw,th,20);ctx.fill();ctx.fillStyle=S.ink||'#222';ctx.fillText(t,p.x,ty)"
+          new_name="if(S.exportNames){ctx.font='700 28px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';let t=ch.name||'',tw=ctx.measureText(t).width+34,th=48,ty=p.y+r+38;ctx.fillStyle='rgba(255,255,255,.9)';exportRoundRect(ctx,p.x-tw/2,ty-th/2,tw,th,20);ctx.fill();ctx.fillStyle=S.ink||'#222';ctx.fillText(t,p.x,ty)}"
+          if old_name not in s: raise SystemExit('export names target not found')
+          s=s.replace(old_name,new_name,1)
+
+          # 7) Replace export image builder with aspect-aware version
+          start=s.index('async function buildExportImage(){')
+          end=s.index("$('#saveImage').onclick=async()=>{", start)
+          old_builder=s[start:end]
+          new_builder="""async function buildExportImage(){let aspect=S.exportAspect||'1:1',w=1200,h=1200;if(aspect==='3:4'){w=1200;h=1600}else if(aspect==='16:9'){w=1600;h=900}let canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;let ctx=canvas.getContext('2d');ctx.fillStyle=S.bg||'#f4f1eb';ctx.fillRect(0,0,w,h);if(S.exportBg&&S.bgImage){try{let bg=await exportLoadImage(S.bgImage);ctx.save();ctx.globalAlpha=.24;exportCover(ctx,bg,0,0,w,h);ctx.restore()}catch(e){}}let c=cur();if(!c)throw new Error('no character');let ls=linksFor(c.id),ids=ls.map(r=>other(r,c.id)),cx=w/2,cy=h/2,base=Math.min(w,h),rx=Math.min(w*.39,base*(ids.length<=4?.36:.39)),ry=Math.min(h*.34,base*(ids.length<=4?.34:.37)),pos={[c.id]:{x:cx,y:cy}},lay=S.layouts[c.id]||{};ids.forEach((id,i)=>{let a=-Math.PI/2+i*Math.PI*2/Math.max(ids.length,1);pos[id]={x:cx+Math.cos(a)*rx,y:cy+Math.sin(a)*ry}});ids.forEach(id=>{let q=lay[id];if(q)pos[id]={x:Math.max(90,Math.min(w-90,q.x*w)),y:Math.max(S.exportTitle?120:80,Math.min(h-120,q.y*h))}});if(S.exportTitle){ctx.fillStyle=S.ink||'#222';ctx.font='800 44px system-ui';ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillText(`${c.name} 的關係網`,54,70)}for(let r of ls){let a=pos[c.id],b=pos[other(r,c.id)];if(!a||!b)continue;ctx.save();ctx.strokeStyle=r.color||'#8a8178';ctx.lineWidth=5;ctx.lineCap='round';ctx.setLineDash(r.style==='dashed'?[20,14]:r.style==='dotted'?[4,13]:[]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.restore();let lab=labelFrom(r,c.id);if(lab){ctx.font='700 28px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';let dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,mx=(a.x+b.x)/2-dy/len*16,my=(a.y+b.y)/2+dx/len*16,tw=ctx.measureText(lab).width+30;ctx.fillStyle='rgba(255,255,255,.9)';exportRoundRect(ctx,mx-tw/2,my-22,tw,44,18);ctx.fill();ctx.fillStyle=S.ink||'#222';ctx.fillText(lab,mx,my)}}let mainR=Math.max(48,S.mainSize/86*76),sideR=Math.max(36,S.sideSize/64*58);for(let id of [c.id,...ids]){let ch=S.chars.find(x=>x.id===id);if(ch&&pos[id])await exportDrawAvatar(ctx,ch,pos[id],id===c.id?mainR:sideR)}return canvas.toDataURL('image/png')}"""
+          s=s[:start]+new_builder+s[end:]
+
+          # 8) Preview image should not force square aspect
+          s=s.replace('.export-preview img{width:100%;display:block;aspect-ratio:1/1;object-fit:contain;background:var(--bg)}', '.export-preview img{width:100%;display:block;height:auto;object-fit:contain;background:var(--bg)}', 1)
+          s=s.replace("toast('正在產生正方形預覽…')", "toast('正在產生圖片預覽…')", 1)
+
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Add avatar size and export customization"
+          git push
