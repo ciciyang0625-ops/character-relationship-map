@@ -1,0 +1,77 @@
+name: Patch relationship perspective toggle
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-perspective-toggle.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch perspective toggle
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+
+          def rep(old,new,count=1):
+              global s
+              if old not in s:
+                  raise SystemExit('missing pattern: '+old[:120])
+              s=s.replace(old,new,count)
+
+          rep(".tool{width:34px;height:34px;border:1px solid var(--line);background:color-mix(in srgb,var(--card) 90%,transparent);border-radius:11px;display:grid;place-items:center}",
+              ".tool{width:34px;height:34px;border:1px solid var(--line);background:color-mix(in srgb,var(--card) 90%,transparent);border-radius:11px;display:grid;place-items:center}.perspective-tool{width:auto;min-width:56px;padding:0 7px;font-size:10px;font-weight:850;letter-spacing:.01em}")
+
+          rep('<div class="tools"><button id="layoutReset" class="tool" title="重設排列">↺</button>',
+              '<div class="tools"><button id="perspectiveToggle" class="tool perspective-tool" title="目前：主要角色對其他角色的看法" aria-label="切換關係視角">主→副</button><button id="layoutReset" class="tool" title="重設排列">↺</button>')
+
+          rep("exportTitle:true,exportNames:true,exportBg:true};",
+              "exportTitle:true,exportNames:true,exportBg:true,perspective:'outgoing'};")
+
+          rep("exportTitle:S.exportTitle,exportNames:S.exportNames,exportBg:S.exportBg},'main'",
+              "exportTitle:S.exportTitle,exportNames:S.exportNames,exportBg:S.exportBg,perspective:S.perspective},'main'")
+
+          rep("S.exportBg=S.exportBg!==false;S.rels=",
+              "S.exportBg=S.exportBg!==false;S.perspective=S.perspective==='incoming'?'incoming':'outgoing';S.rels=")
+
+          rep("function labelFrom(r,id=S.focus){return r.a===id?r.aLabel:r.bLabel}",
+              "function labelFrom(r,id=S.focus){return r.a===id?r.aLabel:r.bLabel}function graphLinksFor(id){return S.rels.filter(r=>{if(r.a!==id&&r.b!==id)return false;return S.perspective==='incoming'?relVisibleFrom(r,other(r,id)):relVisibleFrom(r,id)})}function graphLabelFrom(r,id=S.focus){return S.perspective==='incoming'?labelFrom(r,other(r,id)):labelFrom(r,id)}function updatePerspectiveUI(){let b=$('#perspectiveToggle');if(!b)return;let incoming=S.perspective==='incoming';b.textContent=incoming?'副→主':'主→副';b.title=incoming?'目前：其他角色對主要角色的看法':'目前：主要角色對其他角色的看法';b.setAttribute('aria-pressed',incoming?'true':'false')}")
+
+          rep("renderCurrent();renderRelations();renderCharacters();renderGraph()",
+              "updatePerspectiveUI();renderCurrent();renderRelations();renderCharacters();renderGraph()")
+
+          rep("現在顯示 ${linksFor(c.id).length} 個角色",
+              "現在顯示 ${graphLinksFor(c.id).length} 個角色")
+
+          rep("function drawEdges(ls,cid){let out='';ls.forEach(r=>{let a=S.pos[cid],b=S.pos[other(r,cid)];if(!a||!b)return;let dash=r.style==='dashed'?'9 7':r.style==='dotted'?'2 6':'';out+=`<line x1=\"${a.x}\" y1=\"${a.y}\" x2=\"${b.x}\" y2=\"${b.y}\" stroke=\"${r.color||'#8a8178'}\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-dasharray=\"${dash}\"/>`;let lab=labelFrom(r,cid);",
+              "function drawEdges(ls,cid){let out='';ls.forEach(r=>{let a=S.pos[cid],b=S.pos[other(r,cid)];if(!a||!b)return;let dash=r.style==='dashed'?'9 7':r.style==='dotted'?'2 6':'';out+=`<line x1=\"${a.x}\" y1=\"${a.y}\" x2=\"${b.x}\" y2=\"${b.y}\" stroke=\"${r.color||'#8a8178'}\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-dasharray=\"${dash}\"/>`;let lab=graphLabelFrom(r,cid);")
+
+          rep("function renderGraph(){let nodes=$('#nodes'),emp=$('#empty'),c=cur();if(!c){nodes.innerHTML='';$('#edges').innerHTML='';emp.classList.remove('hidden');return}let ls=linksFor(c.id),ids=",
+              "function renderGraph(){let nodes=$('#nodes'),emp=$('#empty'),c=cur();if(!c){nodes.innerHTML='';$('#edges').innerHTML='';emp.classList.remove('hidden');return}let ls=graphLinksFor(c.id),ids=")
+
+          rep("drawEdges(linksFor(S.focus),S.focus)","drawEdges(graphLinksFor(S.focus),S.focus)")
+
+          rep("$('#layoutReset').onclick=async()=>{",
+              "$('#perspectiveToggle').onclick=async()=>{S.perspective=S.perspective==='incoming'?'outgoing':'incoming';await persist();render();triggerJelly();toast(S.perspective==='incoming'?'顯示：副角色 → 主要角色':'顯示：主要角色 → 副角色')};$('#layoutReset').onclick=async()=>{")
+
+          rep("let c=cur();if(!c)throw new Error('no character');let ls=linksFor(c.id),ids=",
+              "let c=cur();if(!c)throw new Error('no character');let ls=graphLinksFor(c.id),ids=")
+
+          rep("let lab=labelFrom(r,c.id);if(lab){ctx.font='700 28px system-ui';",
+              "let lab=graphLabelFrom(r,c.id);if(lab){ctx.font='700 28px system-ui';")
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Add relationship perspective toggle" || exit 0
+          git push
