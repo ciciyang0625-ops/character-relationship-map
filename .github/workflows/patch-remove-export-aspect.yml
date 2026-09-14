@@ -1,0 +1,56 @@
+name: Patch remove export aspect selector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-remove-export-aspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Remove export aspect options
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('index.html')
+          s = p.read_text()
+
+          replacements = [
+              ('.export-aspect{margin:10px 0 0}', ''),
+              ('<label class="export-aspect">圖片比例<select id="exportAspect"><option value="1:1">1:1 正方形</option><option value="3:4">3:4 直式</option><option value="16:9">16:9 橫式</option></select></label>', ''),
+              (",exportAspect:'1:1',exportTitle:true", ',exportTitle:true'),
+              (',exportAspect:S.exportAspect,exportTitle:S.exportTitle', ',exportTitle:S.exportTitle'),
+              ("S.exportAspect=S.exportAspect||'1:1';", ''),
+              ("$('#exportAspect').value=S.exportAspect;", ''),
+              ("$('#exportAspect').onchange=e=>{S.exportAspect=e.target.value;persist()};", ''),
+              ("async function buildExportImage(){let aspect=S.exportAspect||'1:1',w=1200,h=1200;if(aspect==='3:4'){w=1200;h=1600}else if(aspect==='16:9'){w=1600;h=900}let canvas=document.createElement('canvas');", "async function buildExportImage(){let w=1200,h=1200,canvas=document.createElement('canvas');"),
+          ]
+
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly 1 match, got {count}: {old[:90]}')
+              s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Remove export aspect selector"
+          git push
