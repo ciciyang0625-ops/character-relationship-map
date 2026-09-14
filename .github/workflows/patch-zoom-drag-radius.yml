@@ -1,0 +1,43 @@
+name: Patch zoom drag radius
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-zoom-drag-radius.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make drag radius follow zoom level
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+
+          old1 = "function clampGraphPoint(x,y,w,h){let c=graphCenter(w,h),gr=graphRadius(w,h,c),vx=x-c.x,vy=y-c.y;if(Math.abs(vx)<.001&&Math.abs(vy)<.001){vx=gr.rx*.68;vy=0}let q=Math.sqrt((vx*vx)/(gr.rx*gr.rx)+(vy*vy)/(gr.ry*gr.ry)),target=Math.max(.68,Math.min(1,q||.68)),k=target/(q||1);return{x:c.x+vx*k,y:c.y+vy*k}}"
+          new1 = "function clampGraphPoint(x,y,w,h){let c=graphCenter(w,h),gr=graphRadius(w,h,c),vx=x-c.x,vy=y-c.y;if(Math.abs(vx)<.001&&Math.abs(vy)<.001){vx=gr.rx*.68;vy=0}let q=Math.sqrt((vx*vx)/(gr.rx*gr.rx)+(vy*vy)/(gr.ry*gr.ry)),maxQ=S.scale<1?1/S.scale:1,target=Math.max(.68,Math.min(maxQ,q||.68)),k=target/(q||1);return{x:c.x+vx*k,y:c.y+vy*k}}"
+          if old1 not in s:
+              raise SystemExit('clampGraphPoint target not found')
+          s = s.replace(old1, new1, 1)
+
+          old2 = "let gr=graphRadius(rc.width,rc.height,center),rx=gr.rx,ry=gr.ry,q=Math.sqrt((vx*vx)/(rx*rx)+(vy*vy)/(ry*ry)),minQ=.68,maxQ=1;"
+          new2 = "let gr=graphRadius(rc.width,rc.height,center),rx=gr.rx,ry=gr.ry,q=Math.sqrt((vx*vx)/(rx*rx)+(vy*vy)/(ry*ry)),minQ=.68,maxQ=S.scale<1?1/S.scale:1;"
+          if old2 not in s:
+              raise SystemExit('moveNodeDrag target not found')
+          s = s.replace(old2, new2, 1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Make drag radius scale with graph zoom" || exit 0
+          git push
