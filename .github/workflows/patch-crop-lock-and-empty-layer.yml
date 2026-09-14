@@ -1,0 +1,78 @@
+name: Patch crop lock and empty layer
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-crop-lock-and-empty-layer.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simplify cropper and empty state layering
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          # Remove the crop zoom slider from the character dialog.
+          s = re.sub(
+              r'<label class="crop-zoom-control">照片縮放<input id="cropZoom"[^>]*></label>',
+              '', s, count=1
+          )
+
+          # Make the helper copy match the new interaction.
+          s = s.replace(
+              '拖動圖片調整位置；照片縮放請用上方滑桿',
+              '拖動或縮放裁切框選取範圍，照片本身不會移動'
+          )
+
+          # Remove crop zoom setup helper if present.
+          s = re.sub(
+              r'function setupCropZoom\(\)\{.*?\}(?=async function cropAvatar\(\))',
+              '', s, count=1, flags=re.S
+          )
+
+          # Remove crop zoom reset logic from openCharacter.
+          s = s.replace(
+              "if($('#cropZoom')){$('#cropZoom').value=1;$('#cropZoom').dataset.last='1'}",
+              ''
+          )
+
+          # Replace the image cropper setup so the image is fixed and only crop box moves/resizes.
+          crop_pattern = re.compile(r"\$\('#charPhoto'\)\.onchange=e=>\{.*?\};\$\$\('\.navbtn'\)", re.S)
+          crop_repl = r'''$('#charPhoto').onchange=e=>{let f=e.target.files[0];if(!f)return;let url=URL.createObjectURL(f);$('#cropImage').src=url;$('#cropArea').classList.remove('hidden');if(S.cropper)S.cropper.destroy();S.cropper=new Cropper($('#cropImage'),{aspectRatio:1,viewMode:1,dragMode:'none',autoCropArea:.58,background:false,responsive:true,restore:false,movable:false,scalable:false,rotatable:false,cropBoxMovable:true,cropBoxResizable:true,minCropBoxWidth:54,minCropBoxHeight:54,zoomable:false,zoomOnTouch:false,zoomOnWheel:false,toggleDragModeOnDblclick:false,ready(){updateCropPreview()},cropend:updateCropPreview});};$$('.navbtn')'''
+          s, n = crop_pattern.subn(crop_repl, s, count=1)
+          if n != 1:
+              raise SystemExit('Could not patch cropper handler')
+
+          # Empty-state copy should read like a background hint, not a foreground card.
+          s = s.replace('這個角色還沒有顯示關係', '這個角色還沒有顯示中的關係')
+
+          # Put the empty hint behind avatars/lines and soften it.
+          layer_css = r'''
+          .empty{z-index:0!important;opacity:.24!important}
+          #edges{z-index:1;pointer-events:none}
+          .nodes{z-index:2}
+          .empty b{opacity:.55}
+          .empty h3,.empty p{opacity:.72}
+          '''
+          if '#edges{z-index:1;pointer-events:none}' not in s:
+              s = s.replace('</style>', layer_css + '</style>', 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Lock crop image and soften empty relation hint"
+          git push
