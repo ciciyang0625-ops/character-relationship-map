@@ -1,0 +1,48 @@
+name: Patch edit character avatar
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-edit-character-avatar.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add character edit and avatar replacement
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          replacements=[
+            ('.char-hint{font-size:9px;color:var(--muted);margin-top:2px}.delete{',
+             '.char-hint{font-size:9px;color:var(--muted);margin-top:2px}.char-actions{display:flex;gap:4px}.delete{'),
+            ('<h3 id="charDlgTitle">新增角色</h3><p>名字和照片只要建立一次。</p>',
+             '<h3 id="charDlgTitle">新增角色</h3><p id="charDlgHelp">新增後也可以修改名稱或更換頭像。</p>'),
+            ('<div><div class="char-name">${esc(c.name)}</div><div class="char-hint">查看／修改這個角色的關係網</div></div><button class="delete" data-del="${c.id}">×</button>',
+             '<div><div class="char-name">${esc(c.name)}</div><div class="char-hint">查看／修改這個角色的關係網</div></div><div class="char-actions"><button class="mini-act edit-char" data-edit="${c.id}" title="編輯角色">✎</button><button class="delete" data-del="${c.id}">×</button></div>'),
+            ("$$('.char-row').forEach(r=>r.onclick=e=>{if(e.target.closest('[data-del]'))return;switchFocus(r.dataset.id)});$$('[data-del]').forEach(b=>b.onclick=e=>{e.stopPropagation();deleteCharacter(b.dataset.del)})",
+             "$$('.char-row').forEach(r=>r.onclick=e=>{if(e.target.closest('[data-del],[data-edit]'))return;switchFocus(r.dataset.id)});$$('.edit-char').forEach(b=>b.onclick=e=>{e.stopPropagation();openCharacter(false,b.dataset.edit)});$$('[data-del]').forEach(b=>b.onclick=e=>{e.stopPropagation();deleteCharacter(b.dataset.del)})"),
+            ("function openCharacter(fromNetwork=false){S.createFromNetwork=fromNetwork;S.editChar=null;$('#charDlgTitle').textContent='新增角色';$('#charName').value='';$('#charPhoto').value='';$('#preview').innerHTML='預覽';$('#cropArea').classList.add('hidden');if(S.cropper){S.cropper.destroy();S.cropper=null}charDlg.showModal()}",
+             "function openCharacter(fromNetwork=false,id=null){S.createFromNetwork=fromNetwork;S.editChar=id;let c=id?S.chars.find(x=>x.id===id):null;$('#charDlgTitle').textContent=c?'編輯角色':'新增角色';$('#charDlgHelp').textContent=c?'可以修改名稱；若不選新照片會保留原本頭像。':'新增後也可以修改名稱或更換頭像。';$('#charName').value=c?.name||'';$('#charPhoto').value='';$('#preview').innerHTML=c?.photo?`<img src=\"${c.photo}\">`:'預覽';$('#cropArea').classList.add('hidden');$('#saveChar').textContent=c?'儲存修改':'儲存角色';if(S.cropper){S.cropper.destroy();S.cropper=null}charDlg.showModal()}"),
+            ("async function saveCharacter(){let name=$('#charName').value.trim();if(!name)return toast('請輸入角色名稱');let ph=await cropAvatar(),previousFocus=S.focus,fromNetwork=S.createFromNetwork;let c={id:uid(),name,photo:ph};S.chars.push(c);if(!S.focus)S.focus=c.id;S.createFromNetwork=false;await persist();charDlg.close();render();toast('角色已新增');if(fromNetwork&&previousFocus&&previousFocus!==c.id){S.focus=previousFocus;await persist();render();setTimeout(()=>openRelation(null,c.id),120)}}",
+             "async function saveCharacter(){let name=$('#charName').value.trim();if(!name)return toast('請輸入角色名稱');let ph=await cropAvatar(),editing=S.editChar?S.chars.find(x=>x.id===S.editChar):null,previousFocus=S.focus,fromNetwork=S.createFromNetwork;if(editing){editing.name=name;if(ph)editing.photo=ph;S.editChar=null;S.createFromNetwork=false;await persist();charDlg.close();render();toast('角色已更新');return}let c={id:uid(),name,photo:ph};S.chars.push(c);if(!S.focus)S.focus=c.id;S.createFromNetwork=false;S.editChar=null;await persist();charDlg.close();render();toast('角色已新增');if(fromNetwork&&previousFocus&&previousFocus!==c.id){S.focus=previousFocus;await persist();render();setTimeout(()=>openRelation(null,c.id),120)}}")
+          ]
+          for old,new in replacements:
+            if old not in s:
+              raise SystemExit('missing target: '+old[:100])
+            s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Allow editing character names and avatars"
+          git push
